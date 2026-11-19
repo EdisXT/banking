@@ -1,4 +1,3 @@
-
 @import "tailwindcss";
 
 @config "../tailwind.config.ts";
@@ -94,12 +93,13 @@
   }
 
   /* Home */
+
   .home {
-    @apply no-scrollbar flex w-full flex-row max-xl:max-h-screen max-xl:overflow-y-scroll;
+    @apply no-scrollbar flex w-full min-w-0 flex-row overflow-hidden;
   }
 
   .home-content {
-    @apply no-scrollbar flex w-full flex-1 flex-col gap-8 px-5 sm:px-8 py-7 lg:py-12 xl:max-h-screen xl:overflow-y-scroll;
+    @apply no-scrollbar flex min-w-0 flex-1 flex-col gap-8 px-5 py-7 sm:px-8 lg:py-12 xl:max-h-screen xl:overflow-y-auto;
   }
 
   .home-header {
@@ -139,25 +139,28 @@
   }
 
   /* Right Sidebar */
+
   .right-sidebar {
-    @apply no-scrollbar hidden h-screen max-h-screen flex-col border-l border-gray-200 xl:flex w-[355px] xl:overflow-y-scroll;
+    @apply flex h-screen w-[355px] shrink-0 flex-col border-l border-gray-200;
   }
 
   .profile-banner {
     @apply h-[120px] w-full bg-gradient-mesh bg-cover bg-no-repeat;
   }
 
+
   .profile {
-    @apply relative flex px-6 max-xl:justify-center;
+    @apply relative flex flex-col items-center px-6;
   }
 
   .profile-img {
-    @apply flex-center absolute -top-8 size-24 rounded-full bg-gray-100 border-8 border-white p-2 shadow-profile;
+    @apply flex-center relative -mt-8 size-24 rounded-full bg-gray-100 border-8 border-white p-2 shadow-profile;
   }
 
   .profile-details {
-    @apply flex flex-col pt-24;
+    @apply flex flex-col items-center pt-4 text-center;
   }
+
 
   .profile-name {
     @apply text-24 font-semibold text-gray-900;

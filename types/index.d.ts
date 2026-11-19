@@ -1,3 +1,4 @@
+
 /* eslint-disable no-unused-vars */
 
 declare type SearchParamProps = {
@@ -156,7 +157,7 @@ declare interface HeaderBoxProps {
 }
 
 declare interface MobileNavProps {
-  user: User;
+  user: Pick<User, "firstName" | "lastName" | "email">;
 }
 
 declare interface PageHeaderProps {
@@ -177,15 +178,6 @@ declare interface PlaidLinkProps {
   variant?: "primary" | "ghost";
   dwollaCustomerId?: string;
 }
-
-// declare type User = sdk.Models.Document & {
-//   accountId: string;
-//   email: string;
-//   name: string;
-//   items: string[];
-//   accessToken: string;
-//   image: string;
-// };
 
 declare interface AuthFormProps {
   type: "sign-in" | "sign-up";
@@ -213,13 +205,13 @@ declare interface FooterProps {
 }
 
 declare interface RightSidebarProps {
-  user: User;
+  user: Pick<User, "firstName" | "lastName" | "email">;
   transactions: Transaction[];
   banks: Bank[] & Account[];
 }
 
 declare interface SiderbarProps {
-  user: User;
+  user: Pick<User, "firstName" | "lastName" | "email">;
 }
 
 declare interface RecentTransactionsProps {
@@ -272,10 +264,10 @@ declare interface getTransactionsProps {
 }
 
 declare interface CreateFundingSourceOptions {
-  customerId: string; // Dwolla Customer ID
-  fundingSourceName: string; // Dwolla Funding Source Name
-  plaidToken: string; // Plaid Account Processor Token
-  _links: object; // Dwolla On Demand Authorization Link
+  customerId: string;
+  fundingSourceName: string;
+  plaidToken: string;
+  _links: object;
 }
 
 declare interface CreateTransactionProps {
