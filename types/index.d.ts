@@ -34,6 +34,7 @@ declare type User = {
   dwollaCustomerId: string;
   firstName: string;
   lastName: string;
+  name: string;
   address1: string;
   city: string;
   state: string;
@@ -157,7 +158,7 @@ declare interface HeaderBoxProps {
 }
 
 declare interface MobileNavProps {
-  user: Pick<User, "firstName" | "lastName" | "email">;
+  user: Pick<User, "firstName" | "lastName" | "email" | "name">;
 }
 
 declare interface PageHeaderProps {
@@ -201,17 +202,18 @@ declare interface TotlaBalanceBoxProps {
 }
 
 declare interface FooterProps {
-  user: User;
+  user: Pick<User, "name" | "email">;
+  type?: 'mobile' | 'desktop'
 }
 
 declare interface RightSidebarProps {
-  user: Pick<User, "firstName" | "lastName" | "email">;
+  user: Pick<User, "firstName" | "lastName" | "email" | "name">;
   transactions: Transaction[];
   banks: Bank[] & Account[];
 }
 
 declare interface SiderbarProps {
-  user: Pick<User, "firstName" | "lastName" | "email">;
+  user: Pick<User, "firstName" | "lastName" | "email" | "name">;
 }
 
 declare interface RecentTransactionsProps {
