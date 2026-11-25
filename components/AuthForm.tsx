@@ -16,6 +16,7 @@ import CustomInput from './CustomInput';
 import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { getLoggedInUser, signIn, signUp } from '@/lib/actions/user.actions';
+import PlaidLink from './PlaidLink';
 
 const AuthForm = ({ type }: { type: string }) => {
 
@@ -61,7 +62,6 @@ const AuthForm = ({ type }: { type: string }) => {
                     email: values.email,
                     password: values.password,
                 };
-                
 
                 const newUser = await signUp(userData);
 
@@ -125,7 +125,7 @@ const AuthForm = ({ type }: { type: string }) => {
 
             {user ? (
                 <div className="flex flex-col gap-4">
-                    {/* Plaid link component */}
+                    <PlaidLink user={user} variant="primary" />
                 </div>
             ) : (
                 <>
@@ -256,6 +256,7 @@ const AuthForm = ({ type }: { type: string }) => {
                     </footer>
                 </>
             )}
+
         </section>
     );
 };
