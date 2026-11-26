@@ -1,4 +1,3 @@
-
 "use client";
 
 import {
@@ -40,7 +39,7 @@ const MobileNav = ({ user }: MobileNavProps) => {
               src="/icons/logo.svg"
               width={34}
               height={34}
-              alt="Bank Logo"
+              alt="True Banking Logo"
             />
 
             <h1 className="text-26 font-ibm-plex-serif font-bold text-black-1">
@@ -90,8 +89,6 @@ const MobileNav = ({ user }: MobileNavProps) => {
                   />
                 );
               })}
-
-              USER
             </nav>
 
             <Footer user={user} type="mobile" />

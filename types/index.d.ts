@@ -200,7 +200,7 @@ declare interface TotlaBalanceBoxProps {
 }
 
 declare interface FooterProps {
-  user: User;
+  user: Pick<User, "firstName" | "email">;
   type?: "desktop" | "mobile";
 }
 
@@ -211,7 +211,7 @@ declare interface RightSidebarProps {
 }
 
 declare interface SiderbarProps {
-    user: User;
+  user: User;
 }
 
 declare interface RecentTransactionsProps {
