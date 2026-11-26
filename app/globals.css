@@ -139,7 +139,15 @@
   /* Right Sidebar */
 
   .right-sidebar {
-    @apply hidden h-screen w-[355px] shrink-0 flex-col border-l border-gray-200 xl:flex;
+    @apply no-scrollbar hidden h-screen w-[355px] shrink-0 flex-col overflow-y-auto overflow-x-hidden border-l border-gray-200 xl:flex;
+  }
+
+  .right-sidebar>section {
+    flex-shrink: 0;
+  }
+
+  .right-sidebar::-webkit-scrollbar {
+    display: none;
   }
 
   .profile-banner {
