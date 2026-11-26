@@ -1,4 +1,3 @@
-
 /* eslint-disable no-unused-vars */
 
 declare type SearchParamProps = {
@@ -61,7 +60,7 @@ declare type Account = {
   type: string;
   subtype: string;
   appwriteItemId: string;
-  sharableId: string;
+  shareableId: string;
 };
 
 declare type Transaction = {
@@ -76,7 +75,6 @@ declare type Transaction = {
   category: string;
   date: string;
   image: string;
-  type: string;
   $createdAt: string;
   channel: string;
   senderBankId: string;
@@ -90,13 +88,13 @@ declare type Bank = {
   accessToken: string;
   fundingSourceUrl: string;
   userId: string;
-  sharableId: string;
+  shareableId: string;
 };
 
 declare type AccountTypes =
   | "depository"
   | "credit"
-  | "loan "
+  | "loan"
   | "investment"
   | "other";
 
@@ -186,7 +184,7 @@ declare interface AuthFormProps {
 
 declare interface BankDropdownProps {
   accounts: Account[];
-  setValue?: UseFormSetValue<any>;
+  setValue?: import("react-hook-form").UseFormSetValue<any>;
   otherStyles?: string;
 }
 
@@ -202,12 +200,12 @@ declare interface TotlaBalanceBoxProps {
 }
 
 declare interface FooterProps {
-  user: Pick<User, "name" | "email">;
-  type?: 'mobile' | 'desktop'
+  user: User;
+  type?: "desktop" | "mobile";
 }
 
 declare interface RightSidebarProps {
-  user: Pick<User, "firstName" | "lastName" | "email" | "name">;
+  user: User;
   transactions: Transaction[];
   banks: Bank[] & Account[];
 }
@@ -248,7 +246,10 @@ declare interface PaymentTransferFormProps {
   accounts: Account[];
 }
 
+// ========================================
 // Actions
+// ========================================
+
 declare interface getAccountsProps {
   userId: string;
 }
@@ -306,7 +307,7 @@ declare interface createBankAccountProps {
   accountId: string;
   bankId: string;
   fundingSourceUrl: string;
-  sharableId: string;
+  shareableId: string;
 }
 
 declare interface getBanksProps {

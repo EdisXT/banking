@@ -18,6 +18,19 @@ const dwollaClient = new Client({
     secret: process.env.DWOLLA_SECRET as string,
 });
 
+type DwollaError = {
+    status?: number;
+    body?: {
+        code?: string;
+        message?: string;
+        _links?: {
+            about?: {
+                href?: string;
+            };
+        };
+    };
+};
+
 export const createFundingSource = async (
     options: CreateFundingSourceOptions
 ) => {
@@ -30,10 +43,65 @@ export const createFundingSource = async (
             }
         );
 
+        console.log("Dwolla funding source created successfully.");
+
         return response.headers.get("location");
 
     } catch (error) {
-        console.error("Funding source creation failed:", error);
+        const dwollaError = error as DwollaError;
+
+        // Handle an existing bank account
+        if (dwollaError.body?.code === "DuplicateResource") {
+            const existingUrl =
+                dwollaError.body._links?.about?.href;
+
+            if (!existingUrl) {
+                throw new Error(
+                    "Duplicate funding source URL not found."
+                );
+            }
+
+            // Verify that the funding source belongs to this customer
+            const customerResponse = await dwollaClient.get(
+                `customers/${options.customerId}/funding-sources`
+            );
+
+            const fundingSources =
+                customerResponse.body._embedded?.["funding-sources"] ?? [];
+
+            const existingSource = fundingSources.find(
+                (source: {
+                    removed?: boolean;
+                    _links?: {
+                        self?: {
+                            href?: string;
+                        };
+                    };
+                }) =>
+                    source._links?.self?.href === existingUrl &&
+                    source.removed === false
+            );
+
+            if (!existingSource) {
+                throw new Error(
+                    "Unable to verify existing funding source ownership."
+                );
+            }
+
+            console.log(
+                "Existing Dwolla funding source verified and reused."
+            );
+
+            return existingUrl;
+        }
+
+        console.error(
+            "Funding source creation failed:",
+            dwollaError.body?.code,
+            dwollaError.body?.message
+        );
+
+        throw error;
     }
 };
 
@@ -105,7 +173,8 @@ export const addFundingSource = async ({
     bankName,
 }: AddFundingSourceParams) => {
     try {
-        const dwollaAuthLinks = await createOnDemandAuthorization();
+        const dwollaAuthLinks =
+            await createOnDemandAuthorization();
 
         const fundingSourceOptions = {
             customerId: dwollaCustomerId,
@@ -118,5 +187,6 @@ export const addFundingSource = async ({
 
     } catch (error) {
         console.error("Adding funding source failed:", error);
+        throw error;
     }
 };
