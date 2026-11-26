@@ -40,7 +40,6 @@ const PlaidLink = ({ user, variant }: PlaidLinkProps) => {
 
     const userId = user.$id;
 
-    // Request a token only when a button is clicked
     const initializePlaid = async (selectedMode: LinkMode) => {
         setError("");
         setIsConnecting(true);
@@ -62,20 +61,12 @@ const PlaidLink = ({ user, variant }: PlaidLinkProps) => {
 
             if (!data?.linkToken) {
                 throw new Error(
-                    selectedMode === "update"
-                        ? "Unable to update existing bank."
-                        : "Unable to create Plaid link token."
+                    "Unable to create Plaid link token."
                 );
             }
 
             setToken(data.linkToken);
             setShouldOpen(true);
-
-            console.log(
-                selectedMode === "update"
-                    ? "Plaid update token received"
-                    : "Plaid link token received"
-            );
         } catch (error) {
             console.error("Plaid initialization failed:", error);
 
@@ -88,12 +79,11 @@ const PlaidLink = ({ user, variant }: PlaidLinkProps) => {
     };
 
     const onSuccess = useCallback<PlaidLinkOnSuccess>(
-        async (public_token: string | null) => {
+        async (public_token, metadata) => {
             setIsConnecting(true);
             setError("");
 
             try {
-                // Update existing bank connection
                 if (mode === "update") {
                     const refreshed =
                         await refreshBankConnection();
@@ -103,46 +93,48 @@ const PlaidLink = ({ user, variant }: PlaidLinkProps) => {
                             "Unable to refresh bank connection."
                         );
                     }
-
-                    console.log(
-                        "Plaid update mode completed successfully"
-                    );
                 } else {
-                    // Create a new bank connection
                     if (!public_token) {
                         throw new Error(
                             "No public token received."
                         );
                     }
 
+                    const selectedAccountIds =
+                        metadata.accounts.map(
+                            (account) => account.id
+                        );
+
                     const result = await exchangePublicToken({
                         publicToken: public_token,
                         user: {
                             $id: userId,
                         },
+                        selectedAccountIds,
                     });
 
                     if (
                         result?.publicTokenExchange !== "complete"
                     ) {
                         throw new Error(
+                            result?.message ||
                             "Bank connection failed."
                         );
                     }
 
-                    console.log("Bank saved successfully");
+                    console.log("Bank accounts saved successfully");
                 }
 
                 router.push("/");
                 router.refresh();
-
             } catch (error) {
                 console.error("Bank connection failed:", error);
 
                 setError(
-                    "Unable to complete bank connection. Check the terminal."
+                    error instanceof Error
+                        ? error.message
+                        : "Unable to complete bank connection."
                 );
-
             } finally {
                 setIsConnecting(false);
                 setShouldOpen(false);
@@ -169,7 +161,6 @@ const PlaidLink = ({ user, variant }: PlaidLinkProps) => {
         error: plaidError,
     } = usePlaidLink(config);
 
-    // Automatically open Plaid when the token is ready
     useEffect(() => {
         if (
             ready &&
@@ -197,7 +188,6 @@ const PlaidLink = ({ user, variant }: PlaidLinkProps) => {
 
     return (
         <div className="flex flex-col gap-2">
-
             {variant === "primary" ? (
                 <Button
                     type="button"
@@ -209,7 +199,6 @@ const PlaidLink = ({ user, variant }: PlaidLinkProps) => {
                         ? "Connecting..."
                         : "Connect Bank"}
                 </Button>
-
             ) : variant === "ghost" ? (
                 <Button
                     type="button"
@@ -231,7 +220,6 @@ const PlaidLink = ({ user, variant }: PlaidLinkProps) => {
                             : "Add Bank"}
                     </span>
                 </Button>
-
             ) : (
                 <Button
                     type="button"

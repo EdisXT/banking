@@ -1,14 +1,17 @@
-'use server';
+"use server";
 
 import { ID, Query } from "node-appwrite";
 import { createAdminClient, createSessionClient } from "../appwrite";
 import { cookies } from "next/headers";
+
 import {
     encryptId,
     extractCustomerIdFromUrl,
     parseStringify,
 } from "../utils";
+
 import { plaidClient } from "../plaid";
+
 import {
     addFundingSource,
     createDwollaCustomer,
@@ -47,10 +50,16 @@ const getUserInfo = async ({ userId }: getUserInfoProps) => {
     }
 };
 
+declare type SignInParams = {
+    email: string;
+    password: string;
+};
+
 // Sign in
-export const signIn = async (
-    { email, password }: SignInParams
-) => {
+export const signIn = async ({
+    email,
+    password,
+}: SignInParams) => {
     try {
         const { account } = await createAdminClient();
 
@@ -59,12 +68,16 @@ export const signIn = async (
             password,
         });
 
-        (await cookies()).set("appwrite-session", session.secret, {
-            path: "/",
-            httpOnly: true,
-            sameSite: "strict",
-            secure: true,
-        });
+        (await cookies()).set(
+            "appwrite-session",
+            session.secret,
+            {
+                path: "/",
+                httpOnly: true,
+                sameSite: "strict",
+                secure: true,
+            }
+        );
 
         const user = await getUserInfo({
             userId: session.userId,
@@ -78,9 +91,10 @@ export const signIn = async (
 };
 
 // Sign up
-export const signUp = async (
-    { password, ...userData }: SignUpParams
-): Promise<User | null> => {
+export const signUp = async ({
+    password,
+    ...userData
+}: SignUpParams): Promise<User | null> => {
     const { email, firstName, lastName } = userData;
 
     try {
@@ -126,12 +140,16 @@ export const signUp = async (
             password,
         });
 
-        (await cookies()).set("appwrite-session", session.secret, {
-            path: "/",
-            httpOnly: true,
-            sameSite: "strict",
-            secure: true,
-        });
+        (await cookies()).set(
+            "appwrite-session",
+            session.secret,
+            {
+                path: "/",
+                httpOnly: true,
+                sameSite: "strict",
+                secure: true,
+            }
+        );
 
         return parseStringify(newUser);
     } catch (error) {
@@ -164,11 +182,6 @@ export async function getLoggedInUser() {
     }
 }
 
-declare type SignInParams = {
-    email: string;
-    password: string;
-};
-
 // Logout
 export const logoutAccount = async () => {
     try {
@@ -187,7 +200,7 @@ export const logoutAccount = async () => {
     }
 };
 
-// Create Plaid link token for NEW bank accounts
+// Create Plaid link token for new bank accounts
 export const createLinkToken = async (
     user: Pick<User, "$id">
 ) => {
@@ -202,10 +215,26 @@ export const createLinkToken = async (
             user: {
                 client_user_id: loggedInUser.$id,
             },
+
             client_name: "True Banking",
-            products: ["auth", "transactions"] as Products[],
+
+            products: [
+                "auth",
+                "transactions",
+            ] as Products[],
+
             language: "en",
+
             country_codes: ["US"] as CountryCode[],
+
+            account_filters: {
+                depository: {
+                    account_subtypes: [
+                        "checking",
+                        "savings",
+                    ] as any,
+                },
+            },
         };
 
         const response = await plaidClient.linkTokenCreate(
@@ -225,7 +254,7 @@ export const createLinkToken = async (
     }
 };
 
-// Create Plaid UPDATE MODE token for existing bank
+// Create Plaid update mode token
 export const createUpdateLinkToken = async (
     user: Pick<User, "$id">
 ) => {
@@ -244,17 +273,19 @@ export const createUpdateLinkToken = async (
             return null;
         }
 
-        // Update the existing connected bank
         const bank = banks[0];
 
         const tokenParams = {
             user: {
                 client_user_id: loggedInUser.$id,
             },
+
             client_name: "True Banking",
             language: "en",
             country_codes: ["US"] as CountryCode[],
+
             access_token: bank.accessToken,
+
             additional_consented_products: [
                 "transactions",
             ] as Products[],
@@ -279,7 +310,7 @@ export const createUpdateLinkToken = async (
     }
 };
 
-// Create bank account
+// Create bank account in Appwrite
 const createBankAccount = async ({
     userId,
     bankId,
@@ -314,13 +345,15 @@ const createBankAccount = async ({
     }
 };
 
-// Exchange public token for NEW bank connections
+// Exchange public token and save selected bank accounts
 export const exchangePublicToken = async ({
     publicToken,
     user,
+    selectedAccountIds = [],
 }: {
     publicToken: string;
     user: Pick<User, "$id">;
+    selectedAccountIds?: string[];
 }) => {
     try {
         const loggedInUser = await getLoggedInUser();
@@ -329,9 +362,10 @@ export const exchangePublicToken = async ({
             throw new Error("Unauthorized");
         }
 
-        const response = await plaidClient.itemPublicTokenExchange({
-            public_token: publicToken,
-        });
+        const response =
+            await plaidClient.itemPublicTokenExchange({
+                public_token: publicToken,
+            });
 
         const accessToken = response.data.access_token;
         const itemId = response.data.item_id;
@@ -340,49 +374,128 @@ export const exchangePublicToken = async ({
             access_token: accessToken,
         });
 
-        const accountData = accountsResponse.data.accounts[0];
+        const eligibleAccounts =
+            accountsResponse.data.accounts.filter(
+                (account) =>
+                    account.type === "depository" &&
+                    (
+                        account.subtype === "checking" ||
+                        account.subtype === "savings"
+                    )
+            );
 
-        if (!accountData) {
-            throw new Error("No bank account found");
+        if (selectedAccountIds.length === 0) {
+            throw new Error(
+                "No selected bank accounts were returned by Plaid."
+            );
         }
 
-        const request: ProcessorTokenCreateRequest = {
-            access_token: accessToken,
-            account_id: accountData.account_id,
-            processor:
-                "dwolla" as ProcessorTokenCreateRequestProcessorEnum,
-        };
+        const selectedAccounts = eligibleAccounts.filter(
+            (account) =>
+                selectedAccountIds.includes(account.account_id)
+        );
 
-        const processorTokenResponse =
-            await plaidClient.processorTokenCreate(request);
-
-        const processorToken =
-            processorTokenResponse.data.processor_token;
-
-        const fundingSourceUrl = await addFundingSource({
-            dwollaCustomerId: loggedInUser.dwollaCustomerId,
-            processorToken,
-            bankName: accountData.name,
-        });
-
-        if (!fundingSourceUrl) {
-            throw new Error("Funding source URL not found");
+        if (selectedAccounts.length === 0) {
+            throw new Error(
+                "No eligible checking or savings accounts found."
+            );
         }
 
-        await createBankAccount({
-            userId: loggedInUser.$id,
-            bankId: itemId,
-            accountId: accountData.account_id,
-            accessToken,
-            fundingSourceUrl,
-            shareableId: encryptId(accountData.account_id),
-        });
+        const existingBanks =
+            (await getBanks({
+                userId: loggedInUser.$id,
+            })) ?? [];
+
+        let savedAccounts = 0;
+
+        for (const accountData of selectedAccounts) {
+            const alreadyConnected = existingBanks.some(
+                (bank: Bank) =>
+                    bank.accountId === accountData.account_id
+            );
+
+            if (alreadyConnected) {
+                console.log("Account already connected");
+                continue;
+            }
+
+            const request: ProcessorTokenCreateRequest = {
+                access_token: accessToken,
+
+                account_id: accountData.account_id,
+
+                processor:
+                    "dwolla" as ProcessorTokenCreateRequestProcessorEnum,
+            };
+
+            const processorTokenResponse =
+                await plaidClient.processorTokenCreate(request);
+
+            const processorToken =
+                processorTokenResponse.data.processor_token;
+
+            const fundingSourceUrl = await addFundingSource({
+                dwollaCustomerId: loggedInUser.dwollaCustomerId,
+                processorToken,
+                bankName: accountData.name,
+            });
+
+            if (!fundingSourceUrl) {
+                throw new Error(
+                    "Unable to create Dwolla funding source."
+                );
+            }
+
+            const duplicateFundingSource = existingBanks.some(
+                (bank: Bank) =>
+                    bank.fundingSourceUrl === fundingSourceUrl
+            );
+
+            if (duplicateFundingSource) {
+                console.log(
+                    "Duplicate funding source skipped"
+                );
+
+                continue;
+            }
+
+            const newBank = await createBankAccount({
+                userId: loggedInUser.$id,
+                bankId: itemId,
+                accountId: accountData.account_id,
+                accessToken,
+                fundingSourceUrl,
+                shareableId: encryptId(accountData.account_id),
+            });
+
+            existingBanks.push(newBank);
+
+            savedAccounts++;
+
+            console.log(
+                "Bank account saved:",
+                accountData.name,
+                accountData.subtype
+            );
+        }
 
         revalidatePath("/");
+        revalidatePath("/my-banks");
+        revalidatePath("/payment-transfer");
+        revalidatePath("/transaction-history");
 
-        return parseStringify({
+        if (savedAccounts === 0) {
+            return {
+                publicTokenExchange: "failed",
+                message:
+                    "These bank accounts are already connected.",
+            };
+        }
+
+        return {
             publicTokenExchange: "complete",
-        });
+            savedAccounts,
+        };
     } catch (error: any) {
         console.error("Public token exchange failed:", {
             errorCode: error?.response?.data?.error_code,
@@ -390,11 +503,18 @@ export const exchangePublicToken = async ({
             message: error?.message,
         });
 
-        return null;
+        revalidatePath("/");
+        revalidatePath("/my-banks");
+
+        return {
+            publicTokenExchange: "failed",
+            message:
+                "Unable to connect all selected accounts. Check My Banks and the server terminal.",
+        };
     }
 };
 
-// Refresh dashboard after updating bank permissions
+// Refresh bank connection
 export const refreshBankConnection = async () => {
     const loggedInUser = await getLoggedInUser();
 
@@ -403,6 +523,8 @@ export const refreshBankConnection = async () => {
     }
 
     revalidatePath("/");
+    revalidatePath("/my-banks");
+    revalidatePath("/transaction-history");
 
     console.log("Bank connection refresh requested");
 
@@ -410,7 +532,9 @@ export const refreshBankConnection = async () => {
 };
 
 // Get multiple banks
-export const getBanks = async ({ userId }: getBanksProps) => {
+export const getBanks = async ({
+    userId,
+}: getBanksProps) => {
     try {
         const loggedInUser = await getLoggedInUser();
 
@@ -423,7 +547,10 @@ export const getBanks = async ({ userId }: getBanksProps) => {
         const banks = await database.listDocuments(
             DATABASE_ID!,
             BANK_COLLECTION_ID!,
-            [Query.equal("userId", [userId])]
+            [
+                Query.equal("userId", [userId]),
+                Query.limit(100),
+            ]
         );
 
         return parseStringify(banks.documents);
@@ -460,5 +587,39 @@ export const getBank = async ({
         return parseStringify(bank);
     } catch (error) {
         console.log("Unable to retrieve bank");
+    }
+};
+
+// Find bank by account ID
+export const getBankByAccountId = async ({
+    accountId,
+}: getBankByAccountIdProps) => {
+    try {
+        const loggedInUser = await getLoggedInUser();
+
+        if (!loggedInUser) {
+            throw new Error("Unauthorized");
+        }
+
+        const { database } = await createAdminClient();
+
+        const bank = await database.listDocuments(
+            DATABASE_ID!,
+            BANK_COLLECTION_ID!,
+            [Query.equal("accountId", [accountId])]
+        );
+
+        if (bank.total !== 1) {
+            return null;
+        }
+
+        return parseStringify({
+            $id: bank.documents[0].$id,
+            accountId: bank.documents[0].accountId,
+            userId: bank.documents[0].userId,
+        });
+    } catch (error) {
+        console.log("Unable to retrieve bank by account ID");
+        return null;
     }
 };

@@ -1,11 +1,14 @@
-"use server";
+import "server-only";
 
 import { Client } from "dwolla-v2";
 
 const getEnvironment = (): "production" | "sandbox" => {
     const environment = process.env.DWOLLA_ENV;
 
-    if (environment === "sandbox" || environment === "production") {
+    if (
+        environment === "sandbox" ||
+        environment === "production"
+    ) {
         return environment;
     }
 
@@ -43,15 +46,18 @@ export const createFundingSource = async (
             }
         );
 
-        console.log("Dwolla funding source created successfully.");
+        console.log(
+            "Dwolla funding source created successfully."
+        );
 
         return response.headers.get("location");
 
     } catch (error) {
         const dwollaError = error as DwollaError;
 
-        // Handle an existing bank account
-        if (dwollaError.body?.code === "DuplicateResource") {
+        if (
+            dwollaError.body?.code === "DuplicateResource"
+        ) {
             const existingUrl =
                 dwollaError.body._links?.about?.href;
 
@@ -61,13 +67,14 @@ export const createFundingSource = async (
                 );
             }
 
-            // Verify that the funding source belongs to this customer
             const customerResponse = await dwollaClient.get(
                 `customers/${options.customerId}/funding-sources`
             );
 
             const fundingSources =
-                customerResponse.body._embedded?.["funding-sources"] ?? [];
+                customerResponse.body._embedded?.[
+                    "funding-sources"
+                ] ?? [];
 
             const existingSource = fundingSources.find(
                 (source: {
@@ -113,8 +120,8 @@ export const createOnDemandAuthorization = async () => {
 
         return response.body._links;
 
-    } catch (error) {
-        console.error("Authorization creation failed:", error);
+    } catch {
+        console.error("Authorization creation failed.");
     }
 };
 
@@ -129,8 +136,8 @@ export const createDwollaCustomer = async (
 
         return response.headers.get("location");
 
-    } catch (error) {
-        console.error("Customer creation failed:", error);
+    } catch {
+        console.error("Customer creation failed.");
     }
 };
 
@@ -140,6 +147,12 @@ export const createTransfer = async ({
     amount,
 }: TransferParams) => {
     try {
+        if (getEnvironment() !== "sandbox") {
+            throw new Error(
+                "Only sandbox transfers are enabled."
+            );
+        }
+
         const requestBody = {
             _links: {
                 source: {
@@ -163,7 +176,70 @@ export const createTransfer = async ({
         return response.headers.get("location");
 
     } catch (error) {
-        console.error("Transfer failed:", error);
+        const dwollaError = error as DwollaError;
+
+        console.error("Transfer failed:", {
+            code: dwollaError.body?.code,
+            message: dwollaError.body?.message,
+        });
+
+        return null;
+    }
+};
+
+// Retrieve the current transfer status from Dwolla
+export const getTransferStatus = async (
+    transferUrl: string
+): Promise<string | null> => {
+    try {
+        const url = new URL(transferUrl);
+
+        const expectedHost =
+            getEnvironment() === "sandbox"
+                ? "api-sandbox.dwolla.com"
+                : "api.dwolla.com";
+
+        if (
+            url.protocol !== "https:" ||
+            url.host !== expectedHost ||
+            url.username ||
+            url.password ||
+            url.search ||
+            url.hash ||
+            !/^\/transfers\/[a-f0-9-]{36}$/i.test(
+                url.pathname
+            )
+        ) {
+            throw new Error("Invalid Dwolla transfer URL.");
+        }
+
+        const response = await dwollaClient.get(
+            url.pathname.slice(1)
+        );
+
+        const status = response.body.status;
+
+        const validStatuses = [
+            "pending",
+            "processed",
+            "failed",
+            "cancelled",
+        ];
+
+        if (!validStatuses.includes(status)) {
+            return null;
+        }
+
+        return status;
+
+    } catch (error) {
+        const dwollaError = error as DwollaError;
+
+        console.error("Transfer status retrieval failed:", {
+            code: dwollaError.body?.code,
+        });
+
+        return null;
     }
 };
 
@@ -183,10 +259,12 @@ export const addFundingSource = async ({
             _links: dwollaAuthLinks,
         };
 
-        return await createFundingSource(fundingSourceOptions);
+        return await createFundingSource(
+            fundingSourceOptions
+        );
 
     } catch (error) {
-        console.error("Adding funding source failed:", error);
+        console.error("Adding funding source failed.");
         throw error;
     }
 };

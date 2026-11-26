@@ -1,13 +1,31 @@
 import Link from "next/link";
 import BankInfo from "./BankInfo";
 import TransactionsTable from "./TransactionsTable";
+import { Pagination } from "./Pagination";
 import { cn } from "@/lib/utils";
 
 const RecentTransactions = ({
     accounts,
     transactions = [],
     appwriteItemId,
+    page = 1,
 }: RecentTransactionsProps) => {
+    const rowsPerPage = 10;
+
+    const totalPages = Math.ceil(
+        transactions.length / rowsPerPage
+    );
+
+    const indexOfLastTransaction = page * rowsPerPage;
+
+    const indexOfFirstTransaction =
+        indexOfLastTransaction - rowsPerPage;
+
+    const currentTransactions = transactions.slice(
+        indexOfFirstTransaction,
+        indexOfLastTransaction
+    );
+
     const selected = accounts.find(
         (account) => account.appwriteItemId === appwriteItemId
     );
@@ -61,8 +79,17 @@ const RecentTransactions = ({
                     />
 
                     <TransactionsTable
-                        transactions={transactions}
+                        transactions={currentTransactions}
                     />
+
+                    {totalPages > 1 && (
+                        <div className="my-4 w-full">
+                            <Pagination
+                                totalPages={totalPages}
+                                page={page}
+                            />
+                        </div>
+                    )}
                 </div>
             ) : (
                 <p className="text-sm text-gray-500">

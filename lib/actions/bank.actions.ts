@@ -6,6 +6,7 @@ import { plaidClient } from "../plaid";
 import { parseStringify } from "../utils";
 
 import { getBanks, getBank } from "./user.actions";
+import { getTransactionsByBankId } from "./transaction.actions";
 
 type PlaidError = {
     response?: {
@@ -128,9 +129,17 @@ export const getAccount = async ({
                 accountsResponse.data.item.institution_id!,
         });
 
-        const transactions = await getTransactions({
-            accessToken: bank.accessToken,
-        });
+        // Retrieve Plaid and Appwrite transactions
+        const [transactions, transferRecords] =
+            await Promise.all([
+                getTransactions({
+                    accessToken: bank.accessToken,
+                }),
+
+                getTransactionsByBankId({
+                    bankId: bank.$id,
+                }),
+            ]);
 
         const account = {
             id: accountData.account_id,
@@ -149,25 +158,97 @@ export const getAccount = async ({
             shareableId: bank.shareableId,
         };
 
-        console.log(
-            `Selected account has ${
-                (transactions ?? []).filter(
-                    (t: Transaction) =>
-                        t.accountId === accountData.account_id
-                ).length
-            } transactions.`
-        );
-
-        const allTransactions = (transactions ?? [])
+        // Only retrieve Plaid transactions belonging
+        // to the currently selected account
+        const plaidTransactions = (transactions ?? [])
             .filter(
                 (transaction: Transaction) =>
-                    transaction.accountId === accountData.account_id
-            )
-            .sort(
-                (a: Transaction, b: Transaction) =>
-                    new Date(b.date).getTime() -
-                    new Date(a.date).getTime()
+                    transaction.accountId ===
+                    accountData.account_id
             );
+
+        // Convert Appwrite transfers into the same
+        // format used by the transaction table
+        const transferTransactions = (
+            transferRecords?.documents ?? []
+        ).map((transfer: any) => {
+            const isDebit =
+                transfer.senderBankId === bank.$id;
+
+            const amount = Math.abs(
+                Number(transfer.amount)
+            );
+
+            return {
+                id: `transfer-${transfer.$id}`,
+                $id: transfer.$id,
+
+                name:
+                    transfer.name ||
+                    (isDebit
+                        ? "Outgoing Transfer"
+                        : "Incoming Transfer"),
+
+                paymentChannel:
+                    transfer.channel || "online",
+
+                type: isDebit ? "debit" : "credit",
+
+                accountId: accountData.account_id,
+
+                amount: isDebit ? amount : -amount,
+
+                // A submitted transfer is not necessarily
+                // settled. Keep it processing until
+                // Dwolla status synchronization is added.
+                pending: true,
+
+                category: "Transfer",
+
+                date: transfer.$createdAt,
+
+                image: "",
+
+                $createdAt: transfer.$createdAt,
+
+                channel: transfer.channel || "online",
+
+                senderBankId: transfer.senderBankId,
+
+                receiverBankId:
+                    transfer.receiverBankId ??
+                    transfer.recieverBankId,
+            };
+        });
+
+        // Combine both transaction sources
+        const allTransactions = [
+            ...plaidTransactions,
+            ...transferTransactions,
+        ].sort(
+            (a: Transaction, b: Transaction) =>
+                new Date(b.date).getTime() -
+                new Date(a.date).getTime()
+        );
+
+        console.log("========== TRANSACTION HISTORY ==========");
+
+        console.log(
+            "Plaid transactions:",
+            plaidTransactions.length
+        );
+
+        console.log(
+            "Appwrite transfers:",
+            transferTransactions.length
+        );
+
+        console.log(
+            "Total combined transactions:",
+            allTransactions.length
+        );
+
+        console.log("=========================================");
 
         return parseStringify({
             data: account,
@@ -213,7 +294,7 @@ export const getInstitution = async ({
     }
 };
 
-// Get transactions
+// Get Plaid transactions
 export const getTransactions = async ({
     accessToken,
 }: getTransactionsProps) => {
@@ -250,23 +331,32 @@ export const getTransactions = async ({
                     transaction.transaction_id,
                     {
                         id: transaction.transaction_id,
+
                         name: transaction.name,
+
                         paymentChannel:
                             transaction.payment_channel,
+
                         type:
                             transaction.amount > 0
                                 ? "debit"
                                 : "credit",
+
                         accountId:
                             transaction.account_id,
+
                         amount: transaction.amount,
+
                         pending: transaction.pending,
+
                         category:
                             transaction.category?.[0] ??
                             transaction.personal_finance_category
                                 ?.primary ??
                             "Other",
+
                         date: transaction.date,
+
                         image: transaction.logo_url ?? "",
                     }
                 );
