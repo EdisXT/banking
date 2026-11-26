@@ -1,4 +1,3 @@
-
 "use client";
 
 import Image from "next/image";
@@ -45,30 +44,27 @@ const Sidebar = ({ user }: SiderbarProps) => {
             >
               <div className="relative size-6">
                 <Image
-                    src={item.imgURL}
-                    alt={item.label}
-                    fill
-                    className={cn({
-                        'brightness-[3] invert-0': isActive
-                    })}
-
-                 />
+                  src={item.imgURL}
+                  alt={item.label}
+                  fill
+                  className={cn({
+                    "brightness-[3] invert-0": isActive,
+                  })}
+                />
               </div>
-              <p className={cn(
-                'sidebar-label', {
-                    '!text-white' : isActive
-                }
-              )}>
+
+              <p
+                className={cn("sidebar-label", {
+                  "!text-white": isActive,
+                })}
+              >
                 {item.label}
               </p>
             </Link>
           );
         })}
 
-        <PlaidLink
-          user={user }
-         />
-
+        <PlaidLink user={user} />
       </nav>
 
       <Footer user={user} />
