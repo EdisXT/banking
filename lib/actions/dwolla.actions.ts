@@ -67,9 +67,10 @@ export const createFundingSource = async (
                 );
             }
 
-            const customerResponse = await dwollaClient.get(
-                `customers/${options.customerId}/funding-sources`
-            );
+            const customerResponse =
+                await dwollaClient.get(
+                    `customers/${options.customerId}/funding-sources`
+                );
 
             const fundingSources =
                 customerResponse.body._embedded?.[
@@ -121,7 +122,9 @@ export const createOnDemandAuthorization = async () => {
         return response.body._links;
 
     } catch {
-        console.error("Authorization creation failed.");
+        console.error(
+            "Authorization creation failed."
+        );
     }
 };
 
@@ -187,7 +190,46 @@ export const createTransfer = async ({
     }
 };
 
-// Retrieve the current transfer status from Dwolla
+// Simulate ACH processing in Dwolla Sandbox.
+//
+// This affects eligible pending transfers across the
+// sandbox application, not just one customer's transfer.
+//
+// Never use this function in production.
+export const simulateSandboxTransfers =
+    async (): Promise<boolean> => {
+        if (getEnvironment() !== "sandbox") {
+            return false;
+        }
+
+        try {
+            await dwollaClient.post(
+                "sandbox-simulations"
+            );
+
+            console.log(
+                "Dwolla sandbox simulation requested."
+            );
+
+            return true;
+
+        } catch (error) {
+            const dwollaError = error as DwollaError;
+
+            console.error(
+                "Sandbox simulation failed:",
+                {
+                    status: dwollaError.status,
+                    code: dwollaError.body?.code,
+                    message: dwollaError.body?.message,
+                }
+            );
+
+            return false;
+        }
+    };
+
+// Retrieve the actual transfer status from Dwolla.
 export const getTransferStatus = async (
     transferUrl: string
 ): Promise<string | null> => {
@@ -210,7 +252,9 @@ export const getTransferStatus = async (
                 url.pathname
             )
         ) {
-            throw new Error("Invalid Dwolla transfer URL.");
+            throw new Error(
+                "Invalid Dwolla transfer URL."
+            );
         }
 
         const response = await dwollaClient.get(
@@ -235,9 +279,12 @@ export const getTransferStatus = async (
     } catch (error) {
         const dwollaError = error as DwollaError;
 
-        console.error("Transfer status retrieval failed:", {
-            code: dwollaError.body?.code,
-        });
+        console.error(
+            "Transfer status retrieval failed:",
+            {
+                code: dwollaError.body?.code,
+            }
+        );
 
         return null;
     }
@@ -264,7 +311,10 @@ export const addFundingSource = async ({
         );
 
     } catch (error) {
-        console.error("Adding funding source failed.");
+        console.error(
+            "Adding funding source failed."
+        );
+
         throw error;
     }
 };

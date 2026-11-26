@@ -4,7 +4,6 @@ import { CountryCode } from "plaid/legacy";
 
 import { plaidClient } from "../plaid";
 import { parseStringify } from "../utils";
-
 import { getBanks, getBank } from "./user.actions";
 import { getTransactionsByBankId } from "./transaction.actions";
 
@@ -18,6 +17,76 @@ type PlaidError = {
         };
     };
     message?: string;
+};
+
+type TransferRecord = {
+    $id: string;
+    $createdAt: string;
+    name: string;
+    amount: string | number;
+    channel?: string;
+    status?: string;
+    transferUrl?: string;
+    senderBankId: string;
+    receiverBankId: string;
+};
+
+// Calculate simulated balance adjustments.
+// Only processed sandbox transfers affect balances.
+const getSandboxBalanceAdjustment = (
+    bankId: string,
+    transfers: TransferRecord[]
+): number => {
+    if (process.env.DWOLLA_ENV !== "sandbox") {
+        return 0;
+    }
+
+    let adjustment = 0;
+
+    const seen = new Set<string>();
+
+    for (const transfer of transfers) {
+        if (
+            transfer.status !== "processed" ||
+            !transfer.transferUrl ||
+            seen.has(transfer.transferUrl)
+        ) {
+            continue;
+        }
+
+        const amount = Math.round(
+            Number(transfer.amount) * 100
+        );
+
+        if (
+            !Number.isSafeInteger(amount) ||
+            amount <= 0
+        ) {
+            continue;
+        }
+
+        seen.add(transfer.transferUrl);
+
+        if (transfer.senderBankId === bankId) {
+            adjustment -= amount;
+        }
+
+        if (transfer.receiverBankId === bankId) {
+            adjustment += amount;
+        }
+    }
+
+    return adjustment / 100;
+};
+
+const adjustBalance = (
+    balance: number,
+    adjustment: number
+): number => {
+    return (
+        Math.round(balance * 100) +
+        Math.round(adjustment * 100)
+    ) / 100;
 };
 
 // Get multiple bank accounts
@@ -44,25 +113,55 @@ export const getAccounts = async ({
                     throw new Error("Bank account not found");
                 }
 
-                const institution = await getInstitution({
-                    institutionId:
-                        accountsResponse.data.item.institution_id!,
-                });
+                const [institution, transferRecords] =
+                    await Promise.all([
+                        getInstitution({
+                            institutionId:
+                                accountsResponse.data.item.institution_id!,
+                        }),
+
+                        getTransactionsByBankId({
+                            bankId: bank.$id,
+                        }),
+                    ]);
+
+                const adjustment =
+                    getSandboxBalanceAdjustment(
+                        bank.$id,
+                        transferRecords?.documents ?? []
+                    );
 
                 return {
                     id: accountData.account_id,
-                    availableBalance:
-                        accountData.balances.available ?? 0,
-                    currentBalance:
+
+                    availableBalance: adjustBalance(
+                        accountData.balances.available ??
+                        accountData.balances.current ??
+                        0,
+                        adjustment
+                    ),
+
+                    currentBalance: adjustBalance(
                         accountData.balances.current ?? 0,
+                        adjustment
+                    ),
+
                     institutionId:
                         institution?.institution_id ?? "",
+
                     name: accountData.name,
-                    officialName: accountData.official_name,
+
+                    officialName:
+                        accountData.official_name,
+
                     mask: accountData.mask ?? "",
+
                     type: accountData.type as string,
+
                     subtype: accountData.subtype ?? "",
+
                     appwriteItemId: bank.$id,
+
                     shareableId: bank.shareableId,
                 };
             })
@@ -70,13 +169,16 @@ export const getAccounts = async ({
 
         const totalBanks = accounts.length;
 
-        const totalCurrentBalance = accounts.reduce(
-            (
-                total: number,
-                account: { currentBalance: number }
-            ) => total + account.currentBalance,
-            0
-        );
+        const totalCurrentBalance =
+            accounts.reduce(
+                (
+                    total: number,
+                    account: { currentBalance: number }
+                ) =>
+                    total +
+                    Math.round(account.currentBalance * 100),
+                0
+            ) / 100;
 
         return parseStringify({
             data: accounts,
@@ -124,54 +226,80 @@ export const getAccount = async ({
             throw new Error("Bank account not found");
         }
 
-        const institution = await getInstitution({
-            institutionId:
-                accountsResponse.data.item.institution_id!,
-        });
+        const [
+            institution,
+            transactions,
+            transferRecords,
+        ] = await Promise.all([
+            getInstitution({
+                institutionId:
+                    accountsResponse.data.item.institution_id!,
+            }),
 
-        // Retrieve Plaid and Appwrite transactions
-        const [transactions, transferRecords] =
-            await Promise.all([
-                getTransactions({
-                    accessToken: bank.accessToken,
-                }),
+            getTransactions({
+                accessToken: bank.accessToken,
+            }),
 
-                getTransactionsByBankId({
-                    bankId: bank.$id,
-                }),
-            ]);
+            getTransactionsByBankId({
+                bankId: bank.$id,
+            }),
+        ]);
+
+        const adjustment =
+            getSandboxBalanceAdjustment(
+                bank.$id,
+                transferRecords?.documents ?? []
+            );
 
         const account = {
             id: accountData.account_id,
-            availableBalance:
-                accountData.balances.available ?? 0,
-            currentBalance:
+
+            availableBalance: adjustBalance(
+                accountData.balances.available ??
+                accountData.balances.current ??
+                0,
+                adjustment
+            ),
+
+            currentBalance: adjustBalance(
                 accountData.balances.current ?? 0,
+                adjustment
+            ),
+
             institutionId:
                 institution?.institution_id ?? "",
+
             name: accountData.name,
-            officialName: accountData.official_name,
+
+            officialName:
+                accountData.official_name,
+
             mask: accountData.mask ?? "",
+
             type: accountData.type as string,
+
             subtype: accountData.subtype ?? "",
+
             appwriteItemId: bank.$id,
+
             shareableId: bank.shareableId,
         };
 
-        // Only retrieve Plaid transactions belonging
+        // Only retrieve transactions belonging
         // to the currently selected account
-        const plaidTransactions = (transactions ?? [])
-            .filter(
-                (transaction: Transaction) =>
-                    transaction.accountId ===
-                    accountData.account_id
-            );
+        const plaidTransactions = (
+            transactions ?? []
+        ).filter(
+            (transaction: Transaction) =>
+                transaction.accountId ===
+                accountData.account_id
+        );
 
-        // Convert Appwrite transfers into the same
-        // format used by the transaction table
+        // Convert Appwrite transfers into
+        // the transaction table format
         const transferTransactions = (
             transferRecords?.documents ?? []
-        ).map((transfer: any) => {
+        ).map((transfer: TransferRecord) => {
             const isDebit =
                 transfer.senderBankId === bank.$id;
 
@@ -179,8 +307,12 @@ export const getAccount = async ({
                 Number(transfer.amount)
             );
 
+            const status =
+                transfer.status ?? "unknown";
+
             return {
                 id: `transfer-${transfer.$id}`,
+
                 $id: transfer.$id,
 
                 name:
@@ -198,10 +330,11 @@ export const getAccount = async ({
 
                 amount: isDebit ? amount : -amount,
 
-                // A submitted transfer is not necessarily
-                // settled. Keep it processing until
-                // Dwolla status synchronization is added.
-                pending: true,
+                pending:
+                    status === "pending" ||
+                    status === "unknown",
+
+                status,
 
                 category: "Transfer",
 
@@ -211,17 +344,18 @@ export const getAccount = async ({
 
                 $createdAt: transfer.$createdAt,
 
-                channel: transfer.channel || "online",
+                channel:
+                    transfer.channel || "online",
 
-                senderBankId: transfer.senderBankId,
+                senderBankId:
+                    transfer.senderBankId,
 
                 receiverBankId:
-                    transfer.receiverBankId ??
-                    transfer.recieverBankId,
+                    transfer.receiverBankId,
             };
         });
 
-        // Combine both transaction sources
+        // Combine Plaid and Appwrite transactions
         const allTransactions = [
             ...plaidTransactions,
             ...transferTransactions,
@@ -231,7 +365,9 @@ export const getAccount = async ({
                 new Date(a.date).getTime()
         );
 
-        console.log("========== TRANSACTION HISTORY ==========");
+        console.log(
+            "========== TRANSACTION HISTORY =========="
+        );
 
         console.log(
             "Plaid transactions:",
@@ -244,11 +380,18 @@ export const getAccount = async ({
         );
 
         console.log(
+            "Sandbox balance adjustment:",
+            adjustment
+        );
+
+        console.log(
             "Total combined transactions:",
             allTransactions.length
         );
 
-        console.log("=========================================");
+        console.log(
+            "========================================="
+        );
 
         return parseStringify({
             data: account,
@@ -299,6 +442,7 @@ export const getTransactions = async ({
     accessToken,
 }: getTransactionsProps) => {
     let hasMore = true;
+
     let cursor: string | undefined;
 
     const transactions = new Map<string, any>();
@@ -308,6 +452,7 @@ export const getTransactions = async ({
             const response =
                 await plaidClient.transactionsSync({
                     access_token: accessToken,
+
                     ...(cursor !== undefined
                         ? { cursor }
                         : {}),
@@ -326,7 +471,9 @@ export const getTransactions = async ({
                 ...data.modified,
             ];
 
-            for (const transaction of updatedTransactions) {
+            for (
+                const transaction of updatedTransactions
+            ) {
                 transactions.set(
                     transaction.transaction_id,
                     {
@@ -349,6 +496,10 @@ export const getTransactions = async ({
 
                         pending: transaction.pending,
 
+                        status: transaction.pending
+                            ? "pending"
+                            : "processed",
+
                         category:
                             transaction.category?.[0] ??
                             transaction.personal_finance_category
@@ -357,22 +508,28 @@ export const getTransactions = async ({
 
                         date: transaction.date,
 
-                        image: transaction.logo_url ?? "",
+                        image:
+                            transaction.logo_url ?? "",
                     }
                 );
             }
 
-            for (const removedTransaction of data.removed) {
+            for (
+                const removedTransaction of data.removed
+            ) {
                 transactions.delete(
                     removedTransaction.transaction_id
                 );
             }
 
             cursor = data.next_cursor;
+
             hasMore = data.has_more;
         }
 
-        const result = Array.from(transactions.values());
+        const result = Array.from(
+            transactions.values()
+        );
 
         console.log(
             `Successfully retrieved ${result.length} transactions.`
@@ -382,9 +539,12 @@ export const getTransactions = async ({
 
     } catch (error) {
         const plaidError = error as PlaidError;
+
         const details = plaidError.response?.data;
 
-        if (details?.error_code === "PRODUCT_NOT_READY") {
+        if (
+            details?.error_code === "PRODUCT_NOT_READY"
+        ) {
             console.log(
                 "Plaid is still preparing transaction data."
             );
@@ -392,13 +552,20 @@ export const getTransactions = async ({
             return [];
         }
 
-        console.warn("Plaid transaction retrieval failed:", {
-            errorCode: details?.error_code,
-            errorMessage:
-                details?.error_message ?? plaidError.message,
-            errorType: details?.error_type,
-            requestId: details?.request_id,
-        });
+        console.warn(
+            "Plaid transaction retrieval failed:",
+            {
+                errorCode: details?.error_code,
+
+                errorMessage:
+                    details?.error_message ??
+                    plaidError.message,
+
+                errorType: details?.error_type,
+
+                requestId: details?.request_id,
+            }
+        );
 
         return [];
     }

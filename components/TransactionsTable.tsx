@@ -16,20 +16,39 @@ import {
     removeSpecialCharacters,
 } from "@/lib/utils";
 
+const additionalStatusStyles = {
+    Failed: {
+        borderColor: "border-red-600",
+        backgroundColor: "bg-red-600",
+        textColor: "text-red-700",
+        chipBackgroundColor: "bg-red-50",
+    },
+    Cancelled: {
+        borderColor: "border-gray-400",
+        backgroundColor: "bg-gray-500",
+        textColor: "text-gray-700",
+        chipBackgroundColor: "bg-gray-100",
+    },
+};
+
 const CategoryBadge = ({ category }: CategoryBadgeProps) => {
     const {
         borderColor,
         backgroundColor,
         textColor,
         chipBackgroundColor,
-    } = transactionCategoryStyles[
-        category as keyof typeof transactionCategoryStyles
-    ] || {
-        borderColor: "border-gray-500",
-        backgroundColor: "bg-gray-500",
-        textColor: "text-gray-700",
-        chipBackgroundColor: "bg-gray-100",
-    };
+    } =
+        additionalStatusStyles[
+            category as keyof typeof additionalStatusStyles
+        ] ||
+        transactionCategoryStyles[
+            category as keyof typeof transactionCategoryStyles
+        ] || {
+            borderColor: "border-gray-500",
+            backgroundColor: "bg-gray-500",
+            textColor: "text-gray-700",
+            chipBackgroundColor: "bg-gray-100",
+        };
 
     return (
         <div
@@ -51,6 +70,36 @@ const CategoryBadge = ({ category }: CategoryBadgeProps) => {
             </p>
         </div>
     );
+};
+
+const getTransactionStatus = (
+    transaction: Transaction & { status?: string }
+): string => {
+    switch (transaction.status?.toLowerCase()) {
+        case "processed":
+            return "Success";
+
+        case "pending":
+            return "Processing";
+
+        case "failed":
+            return "Failed";
+
+        case "cancelled":
+            return "Cancelled";
+
+        case "unknown":
+            return "Processing";
+
+        default:
+            if (transaction.status) {
+                return "Processing";
+            }
+
+            return transaction.pending
+                ? "Processing"
+                : "Success";
+    }
 };
 
 const TransactionsTable = ({
@@ -100,9 +149,7 @@ const TransactionsTable = ({
                 )}
 
                 {transactions.map((t: Transaction) => {
-                    const status = t.pending
-                        ? "Processing"
-                        : "Success";
+                    const status = getTransactionStatus(t);
 
                     const amount = formatAmount(
                         Math.abs(t.amount)

@@ -1,14 +1,19 @@
 "use server";
 
 import { ID, Query } from "node-appwrite";
+
 import { createAdminClient } from "../appwrite";
 import { parseStringify } from "../utils";
 import { getBank, getLoggedInUser } from "./user.actions";
+
 import {
     createTransfer,
     getTransferStatus,
+    simulateSandboxTransfers,
 } from "./dwolla.actions";
+
 import { revalidatePath } from "next/cache";
+
 import * as z from "zod";
 
 const {
@@ -31,44 +36,60 @@ type TransferRecord = CreateTransactionProps & {
     status: string;
 };
 
-// Create transaction record in Appwrite
+// Create transaction record in Appwrite.
 const createTransaction = async (
     transaction: TransferRecord
 ) => {
-    const { database } = await createAdminClient();
+    const { database } =
+        await createAdminClient();
 
-    const newTransaction = await database.createDocument(
-        DATABASE_ID!,
-        TRANSACTION_COLLECTION_ID!,
-        ID.unique(),
-        {
-            channel: "online",
-            category: "Transfer",
-            ...transaction,
-        }
+    const newTransaction =
+        await database.createDocument(
+            DATABASE_ID!,
+            TRANSACTION_COLLECTION_ID!,
+            ID.unique(),
+            {
+                channel: "online",
+                category: "Transfer",
+                ...transaction,
+            }
+        );
+
+    console.log(
+        "Transaction saved successfully."
     );
-
-    console.log("Transaction saved successfully.");
 
     return parseStringify(newTransaction);
 };
 
-// Execute payment transfer
+// Refresh banking pages.
+const refreshBankingPages = () => {
+    revalidatePath("/");
+    revalidatePath("/my-banks");
+    revalidatePath("/transaction-history");
+    revalidatePath("/payment-transfer");
+};
+
+// Execute payment transfer.
 export const transferFunds = async (
     input: z.infer<typeof transferSchema>
 ) => {
     let transferUrl: string | null | undefined;
+
     let stage = "Validation";
 
     try {
         if (process.env.DWOLLA_ENV !== "sandbox") {
             return {
                 success: false,
-                message: "Only sandbox transfers are enabled.",
+                message:
+                    "Only sandbox transfers are enabled.",
             };
         }
 
-        const parsed = transferSchema.safeParse(input);
+        const parsed = transferSchema.safeParse(
+            input
+        );
 
         if (!parsed.success) {
             return {
@@ -99,11 +120,13 @@ export const transferFunds = async (
         ) {
             return {
                 success: false,
-                message: "Enter a valid transfer amount.",
+                message:
+                    "Enter a valid transfer amount.",
             };
         }
 
-        const { database } = await createAdminClient();
+        const { database } =
+            await createAdminClient();
 
         stage = "Sender bank lookup";
 
@@ -123,42 +146,49 @@ export const transferFunds = async (
 
         stage = "Receiver bank lookup";
 
-        const receiverBanks = await database.listDocuments(
-            DATABASE_ID!,
-            BANK_COLLECTION_ID!,
-            [
-                Query.equal(
-                    "shareableId",
-                    data.shareableId.trim()
-                ),
-                Query.limit(2),
-            ]
-        );
+        const receiverBanks =
+            await database.listDocuments(
+                DATABASE_ID!,
+                BANK_COLLECTION_ID!,
+                [
+                    Query.equal(
+                        "shareableId",
+                        data.shareableId.trim()
+                    ),
+                    Query.limit(2),
+                ]
+            );
 
         if (receiverBanks.total !== 1) {
             return {
                 success: false,
-                message: "Recipient bank could not be identified.",
+                message:
+                    "Recipient bank could not be identified.",
             };
         }
 
-        const receiverBank = receiverBanks.documents[0];
+        const receiverBank =
+            receiverBanks.documents[0];
 
         stage = "Recipient verification";
 
-        const receiver = await database.getDocument(
-            DATABASE_ID!,
-            USER_COLLECTION_ID!,
-            receiverBank.userId
-        );
+        const receiver =
+            await database.getDocument(
+                DATABASE_ID!,
+                USER_COLLECTION_ID!,
+                receiverBank.userId
+            );
 
         if (
-            String(receiver.email).trim().toLowerCase() !==
+            String(receiver.email)
+                .trim()
+                .toLowerCase() !==
             data.email.trim().toLowerCase()
         ) {
             return {
                 success: false,
-                message: "Recipient email does not match the bank.",
+                message:
+                    "Recipient email does not match the bank.",
             };
         }
 
@@ -170,7 +200,8 @@ export const transferFunds = async (
         ) {
             return {
                 success: false,
-                message: "Bank funding source is unavailable.",
+                message:
+                    "Bank funding source is unavailable.",
             };
         }
 
@@ -198,8 +229,10 @@ export const transferFunds = async (
         transferUrl = await createTransfer({
             sourceFundingSourceUrl:
                 senderBank.fundingSourceUrl,
+
             destinationFundingSourceUrl:
                 receiverBank.fundingSourceUrl,
+
             amount: amount.toFixed(2),
         });
 
@@ -211,33 +244,90 @@ export const transferFunds = async (
             };
         }
 
-        console.log("Dwolla transfer submitted.");
+        console.log(
+            "Dwolla transfer submitted."
+        );
 
         stage = "Appwrite transaction creation";
 
-        // Automatically save the Dwolla URL
-        await createTransaction({
-            name: data.name.trim() || "Bank Transfer",
-            amount: amount.toFixed(2),
-            senderId: senderBank.userId,
-            senderBankId: senderBank.$id,
-            receiverId: receiverBank.userId,
-            receiverBankId: receiverBank.$id,
-            email: data.email.trim(),
-            transferUrl,
-            status: "pending",
-        });
+        const transaction =
+            await createTransaction({
+                name:
+                    data.name.trim() ||
+                    "Bank Transfer",
+
+                amount: amount.toFixed(2),
+
+                senderId: senderBank.userId,
+
+                senderBankId: senderBank.$id,
+
+                receiverId: receiverBank.userId,
+
+                receiverBankId: receiverBank.$id,
+
+                email: data.email.trim(),
+
+                transferUrl,
+
+                status: "pending",
+            });
+
+        // Automatically request sandbox settlement.
+        //
+        // Run only when explicitly enabled through
+        // a server-side environment variable.
+        //
+        // Failure to simulate settlement does not
+        // mean the submitted transfer failed.
+        if (
+            process.env.DWOLLA_ENV === "sandbox" &&
+            process.env.DWOLLA_AUTO_SIMULATE === "true"
+        ) {
+            stage = "Sandbox simulation";
+
+            try {
+                await simulateSandboxTransfers();
+
+                const latestStatus =
+                    await getTransferStatus(
+                        transferUrl
+                    );
+
+                if (
+                    latestStatus &&
+                    latestStatus !== "pending"
+                ) {
+                    await database.updateDocument(
+                        DATABASE_ID!,
+                        TRANSACTION_COLLECTION_ID!,
+                        transaction.$id,
+                        {
+                            status: latestStatus,
+                        }
+                    );
+                }
+
+                console.log(
+                    "Transfer status after simulation:",
+                    latestStatus ?? "unknown"
+                );
+
+            } catch {
+                console.warn(
+                    "Transfer submitted, but sandbox settlement has not been confirmed."
+                );
+            }
+        }
 
         stage = "Page revalidation";
 
-        revalidatePath("/");
-        revalidatePath("/my-banks");
-        revalidatePath("/transaction-history");
-        revalidatePath("/payment-transfer");
+        refreshBankingPages();
 
         return {
             success: true,
-            message: "Transfer submitted successfully.",
+            message:
+                "Transfer submitted successfully.",
         };
 
     } catch (error) {
@@ -247,13 +337,21 @@ export const transferFunds = async (
             type?: string;
         };
 
-        console.error("Payment transfer failed:", {
-            stage,
-            message: transferError.message,
-            code: transferError.code,
-            type: transferError.type,
-            transferSubmitted: Boolean(transferUrl),
-        });
+        console.error(
+            "Payment transfer failed:",
+            {
+                stage,
+
+                message: transferError.message,
+
+                code: transferError.code,
+
+                type: transferError.type,
+
+                transferSubmitted:
+                    Boolean(transferUrl),
+            }
+        );
 
         if (transferUrl) {
             return {
@@ -271,26 +369,39 @@ export const transferFunds = async (
     }
 };
 
-// Retrieve and synchronize transactions
+// Retrieve and synchronize transactions.
 export const getTransactionsByBankId = async ({
     bankId,
 }: getTransactionsByBankIdProps) => {
     try {
+        const loggedIn =
+            await getLoggedInUser();
+
+        if (!loggedIn) {
+            throw new Error("Unauthorized");
+        }
+
         const bank = await getBank({
             documentId: bankId,
         });
 
-        if (!bank) {
+        if (
+            !bank ||
+            bank.userId !== loggedIn.$id
+        ) {
             throw new Error("Unauthorized");
         }
 
-        const { database } = await createAdminClient();
+        const { database } =
+            await createAdminClient();
 
-        // Retrieve all matching records using pagination
+        // Retrieve all matching records
+        // using pagination.
         const getAllTransactions = async (
             field: string
         ) => {
             const documents = [];
+
             let cursor: string | undefined;
 
             while (true) {
@@ -299,18 +410,32 @@ export const getTransactionsByBankId = async ({
                         DATABASE_ID!,
                         TRANSACTION_COLLECTION_ID!,
                         [
-                            Query.equal(field, bankId),
+                            Query.equal(
+                                field,
+                                bankId
+                            ),
+
                             Query.orderAsc("$id"),
+
                             Query.limit(100),
+
                             ...(cursor
-                                ? [Query.cursorAfter(cursor)]
+                                ? [
+                                    Query.cursorAfter(
+                                        cursor
+                                    ),
+                                ]
                                 : []),
                         ]
                     );
 
-                documents.push(...response.documents);
+                documents.push(
+                    ...response.documents
+                );
 
-                if (response.documents.length < 100) {
+                if (
+                    response.documents.length < 100
+                ) {
                     break;
                 }
 
@@ -323,11 +448,14 @@ export const getTransactionsByBankId = async ({
             return documents;
         };
 
-        const [senderTransactions, receiverTransactions] =
-            await Promise.all([
-                getAllTransactions("senderBankId"),
-                getAllTransactions("receiverBankId"),
-            ]);
+        const [
+            senderTransactions,
+            receiverTransactions,
+        ] = await Promise.all([
+            getAllTransactions("senderBankId"),
+
+            getAllTransactions("receiverBankId"),
+        ]);
 
         const uniqueTransactions = Array.from(
             new Map(
@@ -341,60 +469,83 @@ export const getTransactionsByBankId = async ({
             ).values()
         );
 
-        const synchronizedTransactions = await Promise.all(
-            uniqueTransactions.map(async (transaction) => {
-                if (!transaction.transferUrl) {
-                    return {
-                        ...transaction,
-                        status: "unknown",
-                    };
-                }
+        // Query Dwolla for the actual status of
+        // each transfer and synchronize Appwrite.
+        const synchronizedTransactions =
+            await Promise.all(
+                uniqueTransactions.map(
+                    async (transaction) => {
+                        if (!transaction.transferUrl) {
+                            return {
+                                ...transaction,
+                                status: "unknown",
+                            };
+                        }
 
-                // Synchronize nonterminal transfers
-                if (
-                    transaction.status === "failed" ||
-                    transaction.status === "cancelled"
-                ) {
-                    return transaction;
-                }
+                        if (
+                            transaction.status === "failed" ||
+                            transaction.status === "cancelled"
+                        ) {
+                            return transaction;
+                        }
 
-                try {
-                    const latestStatus =
-                        await getTransferStatus(
-                            transaction.transferUrl
-                        );
+                        try {
+                            const latestStatus =
+                                await getTransferStatus(
+                                    transaction.transferUrl
+                                );
 
-                    if (
-                        latestStatus &&
-                        latestStatus !== transaction.status
-                    ) {
-                        return await database.updateDocument(
-                            DATABASE_ID!,
-                            TRANSACTION_COLLECTION_ID!,
-                            transaction.$id,
-                            {
-                                status: latestStatus,
+                            if (
+                                latestStatus &&
+                                latestStatus !==
+                                    transaction.status
+                            ) {
+                                console.log(
+                                    "Transfer status updated:",
+                                    {
+                                        previous:
+                                            transaction.status,
+
+                                        current:
+                                            latestStatus,
+                                    }
+                                );
+
+                                return await database.updateDocument(
+                                    DATABASE_ID!,
+                                    TRANSACTION_COLLECTION_ID!,
+                                    transaction.$id,
+                                    {
+                                        status: latestStatus,
+                                    }
+                                );
                             }
-                        );
+
+                        } catch {
+                            console.warn(
+                                "Unable to synchronize transfer status."
+                            );
+                        }
+
+                        // Preserve the last known status
+                        // when Dwolla is temporarily unavailable.
+                        return transaction;
                     }
-
-                } catch {
-                    console.warn(
-                        "Unable to synchronize transfer status."
-                    );
-                }
-
-                return transaction;
-            })
-        );
+                )
+            );
 
         return parseStringify({
-            total: synchronizedTransactions.length,
-            documents: synchronizedTransactions,
+            total:
+                synchronizedTransactions.length,
+
+            documents:
+                synchronizedTransactions,
         });
 
     } catch {
-        console.error("Unable to retrieve transactions.");
+        console.error(
+            "Unable to retrieve transactions."
+        );
 
         return {
             total: 0,
