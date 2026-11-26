@@ -3,9 +3,16 @@
 import { ID, Query } from "node-appwrite";
 import { createAdminClient, createSessionClient } from "../appwrite";
 import { cookies } from "next/headers";
-import { encryptId, extractCustomerIdFromUrl, parseStringify } from "../utils";
+import {
+    encryptId,
+    extractCustomerIdFromUrl,
+    parseStringify,
+} from "../utils";
 import { plaidClient } from "../plaid";
-import { addFundingSource, createDwollaCustomer } from "./dwolla.actions";
+import {
+    addFundingSource,
+    createDwollaCustomer,
+} from "./dwolla.actions";
 
 import {
     Products,
@@ -34,7 +41,6 @@ const getUserInfo = async ({ userId }: getUserInfoProps) => {
         );
 
         return parseStringify(user.documents[0] ?? null);
-
     } catch (error) {
         console.error("getUserInfo failed:", error);
         return null;
@@ -65,9 +71,8 @@ export const signIn = async (
         });
 
         return parseStringify(user);
-
     } catch (error) {
-        console.error("Error", error);
+        console.error("Sign-in failed");
         return null;
     }
 };
@@ -76,15 +81,12 @@ export const signIn = async (
 export const signUp = async (
     { password, ...userData }: SignUpParams
 ): Promise<User | null> => {
-
     const { email, firstName, lastName } = userData;
-
-    let newUserAccount;
 
     try {
         const { account, database } = await createAdminClient();
 
-        newUserAccount = await account.create({
+        const newUserAccount = await account.create({
             userId: ID.unique(),
             email,
             password,
@@ -132,9 +134,8 @@ export const signUp = async (
         });
 
         return parseStringify(newUser);
-
     } catch (error) {
-        console.error("Error", error);
+        console.error("Sign-up failed");
         return null;
     }
 };
@@ -157,9 +158,8 @@ export async function getLoggedInUser() {
         });
 
         return parseStringify(userInfo ?? null);
-
     } catch (error) {
-        console.log("getLoggedInUser:", error);
+        console.log("getLoggedInUser failed");
         return null;
     }
 }
@@ -181,15 +181,16 @@ export const logoutAccount = async () => {
         (await cookies()).delete("appwrite-session");
 
         return true;
-
     } catch (error) {
-        console.error("Logout error:", error);
+        console.error("Logout failed");
         return null;
     }
 };
 
-// Create Plaid link token
-export const createLinkToken = async (user: User) => {
+// Create Plaid link token for NEW bank accounts
+export const createLinkToken = async (
+    user: Pick<User, "$id">
+) => {
     try {
         const loggedInUser = await getLoggedInUser();
 
@@ -201,20 +202,79 @@ export const createLinkToken = async (user: User) => {
             user: {
                 client_user_id: loggedInUser.$id,
             },
-            client_name: `${loggedInUser.firstName} ${loggedInUser.lastName}`,
-            products: ["auth"] as Products[],
+            client_name: "True Banking",
+            products: ["auth", "transactions"] as Products[],
             language: "en",
             country_codes: ["US"] as CountryCode[],
         };
 
-        const response = await plaidClient.linkTokenCreate(tokenParams);
+        const response = await plaidClient.linkTokenCreate(
+            tokenParams
+        );
 
         return parseStringify({
             linkToken: response.data.link_token,
         });
+    } catch (error: any) {
+        console.error("Plaid link token creation failed:", {
+            errorCode: error?.response?.data?.error_code,
+            errorMessage: error?.response?.data?.error_message,
+        });
 
-    } catch (error) {
-        console.error(error);
+        return null;
+    }
+};
+
+// Create Plaid UPDATE MODE token for existing bank
+export const createUpdateLinkToken = async (
+    user: Pick<User, "$id">
+) => {
+    try {
+        const loggedInUser = await getLoggedInUser();
+
+        if (!loggedInUser || loggedInUser.$id !== user.$id) {
+            throw new Error("Unauthorized");
+        }
+
+        const banks = await getBanks({
+            userId: loggedInUser.$id,
+        });
+
+        if (!banks || banks.length === 0) {
+            return null;
+        }
+
+        // Update the existing connected bank
+        const bank = banks[0];
+
+        const tokenParams = {
+            user: {
+                client_user_id: loggedInUser.$id,
+            },
+            client_name: "True Banking",
+            language: "en",
+            country_codes: ["US"] as CountryCode[],
+            access_token: bank.accessToken,
+            additional_consented_products: [
+                "transactions",
+            ] as Products[],
+        };
+
+        const response = await plaidClient.linkTokenCreate(
+            tokenParams
+        );
+
+        console.log("Plaid update mode token created");
+
+        return {
+            linkToken: response.data.link_token,
+        };
+    } catch (error: any) {
+        console.error("Plaid update token creation failed:", {
+            errorCode: error?.response?.data?.error_code,
+            errorMessage: error?.response?.data?.error_message,
+        });
+
         return null;
     }
 };
@@ -248,18 +308,20 @@ const createBankAccount = async ({
         console.log("Bank account successfully created");
 
         return parseStringify(bankAccount);
-
     } catch (error) {
-        console.error("Error creating bank account:", error);
+        console.error("Error creating bank account");
         throw error;
     }
 };
 
-// Exchange public token
+// Exchange public token for NEW bank connections
 export const exchangePublicToken = async ({
     publicToken,
     user,
-}: exchangePublicTokenProps) => {
+}: {
+    publicToken: string;
+    user: Pick<User, "$id">;
+}) => {
     try {
         const loggedInUser = await getLoggedInUser();
 
@@ -274,7 +336,6 @@ export const exchangePublicToken = async ({
         const accessToken = response.data.access_token;
         const itemId = response.data.item_id;
 
-        // Get account information from Plaid
         const accountsResponse = await plaidClient.accountsGet({
             access_token: accessToken,
         });
@@ -285,11 +346,11 @@ export const exchangePublicToken = async ({
             throw new Error("No bank account found");
         }
 
-        // Create a processor token
         const request: ProcessorTokenCreateRequest = {
             access_token: accessToken,
             account_id: accountData.account_id,
-            processor: "dwolla" as ProcessorTokenCreateRequestProcessorEnum,
+            processor:
+                "dwolla" as ProcessorTokenCreateRequestProcessorEnum,
         };
 
         const processorTokenResponse =
@@ -298,7 +359,6 @@ export const exchangePublicToken = async ({
         const processorToken =
             processorTokenResponse.data.processor_token;
 
-        // Create a funding source URL using Dwolla
         const fundingSourceUrl = await addFundingSource({
             dwollaCustomerId: loggedInUser.dwollaCustomerId,
             processorToken,
@@ -309,7 +369,6 @@ export const exchangePublicToken = async ({
             throw new Error("Funding source URL not found");
         }
 
-        // Create a bank account
         await createBankAccount({
             userId: loggedInUser.$id,
             bankId: itemId,
@@ -319,21 +378,35 @@ export const exchangePublicToken = async ({
             shareableId: encryptId(accountData.account_id),
         });
 
-        // Revalidate the path
         revalidatePath("/");
 
         return parseStringify({
             publicTokenExchange: "complete",
         });
-
-    } catch (error) {
-        console.error(
-            "An error occurred while exchanging token:",
-            error
-        );
+    } catch (error: any) {
+        console.error("Public token exchange failed:", {
+            errorCode: error?.response?.data?.error_code,
+            errorMessage: error?.response?.data?.error_message,
+            message: error?.message,
+        });
 
         return null;
     }
+};
+
+// Refresh dashboard after updating bank permissions
+export const refreshBankConnection = async () => {
+    const loggedInUser = await getLoggedInUser();
+
+    if (!loggedInUser) {
+        return false;
+    }
+
+    revalidatePath("/");
+
+    console.log("Bank connection refresh requested");
+
+    return true;
 };
 
 // Get multiple banks
@@ -354,9 +427,8 @@ export const getBanks = async ({ userId }: getBanksProps) => {
         );
 
         return parseStringify(banks.documents);
-
     } catch (error) {
-        console.log(error);
+        console.log("Unable to retrieve banks");
     }
 };
 
@@ -386,8 +458,7 @@ export const getBank = async ({
         }
 
         return parseStringify(bank);
-
     } catch (error) {
-        console.log(error);
+        console.log("Unable to retrieve bank");
     }
 };

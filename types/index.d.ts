@@ -211,7 +211,7 @@ declare interface RightSidebarProps {
 }
 
 declare interface SiderbarProps {
-  user: Pick<User, "firstName" | "lastName" | "email" | "name">;
+    user: User;
 }
 
 declare interface RecentTransactionsProps {
